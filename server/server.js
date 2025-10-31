@@ -13,6 +13,13 @@ const USE_EXPERIMENTAL_PATTERNS = process.env.USE_EXPERIMENTAL_PATTERNS === 'tru
 const app = express();
 const port = process.env.PORT || 3002;
 
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('📁 Created uploads directory');
+}
+
 // Initialize OpenAI with fallback for missing API key
 let openai = null;
 const apiKey = process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.trim() : '';
@@ -475,6 +482,48 @@ app.post('/compare-text', async (req, res) => {
     const poItems = extractItemDetailsEnhanced(poText);
     const invoiceItems = extractItemDetailsEnhanced(invoiceText);
 
+    // Extract financial information
+    const extractFinancialInfo = (text) => {
+      const lines = text.split('\n');
+      const financialInfo = {};
+      
+      for (const line of lines) {
+        // Enhanced patterns for subtotal
+        if (line.includes('Subtotal:') || line.includes('Sub Total:') || line.includes('Sub-total:')) {
+          const subtotalMatch = line.match(/(?:Subtotal|Sub Total|Sub-total):\s*([₹$€£]?[\d,]+(?:\.\d+)?)/);
+          if (subtotalMatch) {
+            financialInfo.subtotal = subtotalMatch[1].replace(/[₹$€£,]/g, '');
+          }
+        }
+        // Enhanced patterns for discount
+        else if (line.includes('Discount:') || line.includes('Disc:')) {
+          const discountMatch = line.match(/(?:Discount|Disc):\s*(-?[₹$€£]?[\d,]+(?:\.\d+)?)/);
+          if (discountMatch) {
+            financialInfo.discount = discountMatch[1].replace(/[₹$€£,]/g, '');
+          }
+        }
+        // Enhanced patterns for tax
+        else if (line.includes('Tax:') || line.includes('GST:') || line.includes('VAT:')) {
+          const taxMatch = line.match(/(?:Tax|GST|VAT):?\s*([₹$€£]?[\d,]+(?:\.\d+)?)/);
+          if (taxMatch) {
+            financialInfo.tax = taxMatch[1].replace(/[₹$€£,]/g, '');
+          }
+        }
+        // Enhanced patterns for total
+        else if (line.includes('Total:') || line.includes('Grand Total:') || line.includes('Final Total:')) {
+          const totalMatch = line.match(/(?:Total|Grand Total|Final Total):\s*([₹$€£]?[\d,]+(?:\.\d+)?)/);
+          if (totalMatch) {
+            financialInfo.total = totalMatch[1].replace(/[₹$€£,]/g, '');
+          }
+        }
+      }
+      
+      return financialInfo;
+    };
+    
+    const poFinancials = extractFinancialInfo(poText);
+    const invoiceFinancials = extractFinancialInfo(invoiceText);
+
     console.log('📋 Document Analysis:', {
       poType,
       invoiceType,
@@ -557,8 +606,8 @@ Invoice Text:
 ${invoiceText}
 
 EXTRACTED FINANCIAL INFORMATION:
-PO Financials: Subtotal: ${poFinancials.subtotal}, Tax: ${poFinancials.tax}, Total: ${poFinancials.total}
-Invoice Financials: Subtotal: ${invoiceFinancials.subtotal}, Tax: ${invoiceFinancials.tax}, Total: ${invoiceFinancials.total}
+PO Financials: Subtotal: ${poFinancials?.subtotal || 'N/A'}, Tax: ${poFinancials?.tax || 'N/A'}, Total: ${poFinancials?.total || 'N/A'}
+Invoice Financials: Subtotal: ${invoiceFinancials?.subtotal || 'N/A'}, Tax: ${invoiceFinancials?.tax || 'N/A'}, Total: ${invoiceFinancials?.total || 'N/A'}
 
 Focus on comparing:
 - Amounts (Qty, Unit Cost, Total, Subtotal, Tax, Final Total)
@@ -615,9 +664,24 @@ For recommendations, provide specific, actionable advice like:
         differences: [
           {
             type: 'amount',
-            poValues: [poFinancials.subtotal || '$5500', poFinancials.discount || '-$275', poFinancials.tax || '$522.5', poFinancials.total || '$5747.5'],
-            invoiceValues: [invoiceFinancials.subtotal || '$5500', invoiceFinancials.discount || '-$275', invoiceFinancials.tax || '$522.5', invoiceFinancials.total || '$5747.5'],
-            match: (poFinancials.subtotal === invoiceFinancials.subtotal) && (poFinancials.discount === invoiceFinancials.discount) && (poFinancials.tax === invoiceFinancials.tax) && (poFinancials.total === invoiceFinancials.total)
+            poValues: [
+              poFinancials?.subtotal || '$5500', 
+              poFinancials?.discount || '-$275', 
+              poFinancials?.tax || '$522.5', 
+              poFinancials?.total || '$5747.5'
+            ],
+            invoiceValues: [
+              invoiceFinancials?.subtotal || '$5500', 
+              invoiceFinancials?.discount || '-$275', 
+              invoiceFinancials?.tax || '$522.5', 
+              invoiceFinancials?.total || '$5747.5'
+            ],
+            match: (
+              (poFinancials?.subtotal || '') === (invoiceFinancials?.subtotal || '') && 
+              (poFinancials?.discount || '') === (invoiceFinancials?.discount || '') && 
+              (poFinancials?.tax || '') === (invoiceFinancials?.tax || '') && 
+              (poFinancials?.total || '') === (invoiceFinancials?.total || '')
+            )
           },
           {
             type: 'date',
@@ -978,8 +1042,8 @@ Invoice Text:
 ${invoiceText}
 
 EXTRACTED FINANCIAL INFORMATION:
-PO Financials: Subtotal: ${poFinancials.subtotal}, Tax: ${poFinancials.tax}, Total: ${poFinancials.total}
-Invoice Financials: Subtotal: ${invoiceFinancials.subtotal}, Tax: ${invoiceFinancials.tax}, Total: ${invoiceFinancials.total}
+PO Financials: Subtotal: ${poFinancials?.subtotal || 'N/A'}, Tax: ${poFinancials?.tax || 'N/A'}, Total: ${poFinancials?.total || 'N/A'}
+Invoice Financials: Subtotal: ${invoiceFinancials?.subtotal || 'N/A'}, Tax: ${invoiceFinancials?.tax || 'N/A'}, Total: ${invoiceFinancials?.total || 'N/A'}
 
 Focus on comparing:
 - Amounts (Qty, Unit Cost, Total, Subtotal, Tax, Final Total, Discount)
@@ -1036,9 +1100,24 @@ For recommendations, provide specific, actionable advice like:
         differences: [
           {
             type: 'amount',
-            poValues: [poFinancials.subtotal || '$5500', poFinancials.discount || '-$275', poFinancials.tax || '$522.5', poFinancials.total || '$5747.5'],
-            invoiceValues: [invoiceFinancials.subtotal || '$5500', invoiceFinancials.discount || '-$275', invoiceFinancials.tax || '$522.5', invoiceFinancials.total || '$5747.5'],
-            match: (poFinancials.subtotal === invoiceFinancials.subtotal) && (poFinancials.discount === invoiceFinancials.discount) && (poFinancials.tax === invoiceFinancials.tax) && (poFinancials.total === invoiceFinancials.total)
+            poValues: [
+              poFinancials?.subtotal || '$5500', 
+              poFinancials?.discount || '-$275', 
+              poFinancials?.tax || '$522.5', 
+              poFinancials?.total || '$5747.5'
+            ],
+            invoiceValues: [
+              invoiceFinancials?.subtotal || '$5500', 
+              invoiceFinancials?.discount || '-$275', 
+              invoiceFinancials?.tax || '$522.5', 
+              invoiceFinancials?.total || '$5747.5'
+            ],
+            match: (
+              (poFinancials?.subtotal || '') === (invoiceFinancials?.subtotal || '') && 
+              (poFinancials?.discount || '') === (invoiceFinancials?.discount || '') && 
+              (poFinancials?.tax || '') === (invoiceFinancials?.tax || '') && 
+              (poFinancials?.total || '') === (invoiceFinancials?.total || '')
+            )
           },
           {
             type: 'date',
@@ -1087,6 +1166,7 @@ For recommendations, provide specific, actionable advice like:
 
   } catch (error) {
     console.error('❌ PDF comparison error:', error.message);
+    console.error('❌ Error stack:', error.stack);
     
     // Clean up files on error
     if (req.files) {
@@ -1101,7 +1181,8 @@ For recommendations, provide specific, actionable advice like:
     res.status(500).json({
       success: false,
       message: 'PDF comparison failed',
-      error: error.message
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
