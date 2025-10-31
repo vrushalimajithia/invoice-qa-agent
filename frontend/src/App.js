@@ -2,7 +2,23 @@ import React, { useState, useCallback } from 'react';
 import axios from 'axios';
 import './App.css';
 
-const API_BASE_URL = 'http://localhost:3002';
+// Determine API URL - check environment variable first, then check if we're on Render
+const getApiBaseUrl = () => {
+  // If environment variable is set, use it
+  if (process.env.REACT_APP_API_URL) {
+    return process.env.REACT_APP_API_URL;
+  }
+  
+  // If we're on Render's frontend domain, use the backend URL
+  if (window.location.hostname.includes('onrender.com')) {
+    return 'https://invoice-checker-backend.onrender.com';
+  }
+  
+  // Default to localhost for local development
+  return 'http://localhost:3002';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 function App() {
   const [isUploading, setIsUploading] = useState(false);
@@ -106,7 +122,24 @@ function App() {
       }
     } catch (error) {
       console.error('PDF comparison error:', error);
-      setError(error.response?.data?.message || 'PDF comparison failed. Please try again.');
+      console.error('API_BASE_URL:', API_BASE_URL);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response,
+        code: error.code,
+        config: error.config?.url
+      });
+      
+      let errorMessage = 'PDF comparison failed. ';
+      if (error.code === 'ERR_NETWORK' || error.message?.includes('Network Error')) {
+        errorMessage += `Cannot connect to backend at ${API_BASE_URL}. The backend may be sleeping (wait 30-60 seconds) or the URL is incorrect.`;
+      } else if (error.response) {
+        errorMessage += error.response.data?.message || error.message || 'Unknown error occurred.';
+      } else {
+        errorMessage += error.message || 'Please try again.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsUploading(false);
     }
@@ -262,6 +295,19 @@ function App() {
       <div className="container">
         <h1>📄 AI Invoice Checker</h1>
         <p className="subtitle">Compare PO and Invoice documents for intelligent analysis</p>
+        {/* Debug: Show API URL for troubleshooting */}
+        <div style={{ 
+          fontSize: '12px', 
+          color: '#666', 
+          marginBottom: '15px', 
+          textAlign: 'center',
+          padding: '8px',
+          backgroundColor: '#f5f5f5',
+          borderRadius: '4px',
+          border: '1px solid #ddd'
+        }}>
+          🔗 <strong>Backend API:</strong> {API_BASE_URL}
+        </div>
 
         {/* Tab Navigation - Hidden for now */}
         {/* <div className="tab-navigation">
